@@ -28,7 +28,9 @@ export async function createProduct(formData: FormData) {
     name: stringValue(formData, 'name'),
     bigo_sku: stringValue(formData, 'bigo_sku') || null,
     diamond_amount: stringValue(formData, 'diamond_amount') ? numberValue(formData, 'diamond_amount') : null,
-    unit_cost_usd: numberValue(formData, 'unit_cost_usd'),
+    // Legacy schema requires this column, but product setup defines selling packages only.
+    // Procurement/inventory modules own cost basis.
+    unit_cost_usd: 0,
     unit_price_php: numberValue(formData, 'unit_price_php'),
     is_active: formData.get('is_active') === 'on',
   });
@@ -64,7 +66,11 @@ export async function createOrder(formData: FormData) {
   const resellerId = stringValue(formData, 'reseller_id') || null;
   const quantity = numberValue(formData, 'quantity');
   const fxRateUsdPhp = numberValue(formData, 'fx_rate_usd_php');
-  const { data: product, error: productError } = await supabase.from('products').select('*').eq('id', productId).single();
+  const { data: product, error: productError } = await supabase
+    .from('products')
+    .select('id, unit_price_php, is_active')
+    .eq('id', productId)
+    .single();
   if (productError || !product) throw new Error(productError?.message ?? 'Product not found');
   if (!product.is_active) throw new Error('Archived products cannot be ordered.');
   let reseller: { commission_type: 'percentage' | 'fixed'; commission_rate: number } | null = null;
@@ -74,7 +80,7 @@ export async function createOrder(formData: FormData) {
     if (data.status !== 'active') throw new Error('Inactive resellers cannot create new orders.');
     reseller = data as { commission_type: 'percentage' | 'fixed'; commission_rate: number };
   }
-  const snapshot = buildOrderSnapshot({ unitPricePhp: Number(product.unit_price_php), unitCostUsd: Number(product.unit_cost_usd), quantity, fxRateUsdPhp, commissionType: reseller?.commission_type, commissionRate: reseller?.commission_rate });
+  const snapshot = buildOrderSnapshot({ unitPricePhp: Number(product.unit_price_php), unitCostUsd: 0, quantity, fxRateUsdPhp, commissionType: reseller?.commission_type, commissionRate: reseller?.commission_rate });
   const today = new Date();
   const dayStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())).toISOString();
   const { count } = await supabase.from('orders').select('id', { count: 'exact', head: true }).gte('created_at', dayStart);
