@@ -44,10 +44,14 @@ export function canViewProfit(role: Role): boolean {
   return role === 'admin' || role === 'finance';
 }
 
+export function canViewAdminReports(role: Role): boolean {
+  return role === 'admin';
+}
+
 export function canManageResellers(role: Role): boolean {
   return role === 'admin' || role === 'reseller_manager';
 }
 
 export function canExportReports(role: Role): boolean {
-  return role === 'admin' || role === 'finance' || role === 'reseller_manager' || role === 'reseller';
+  return canViewAdminReports(role);
 }

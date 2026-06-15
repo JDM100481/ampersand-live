@@ -7,3 +7,4 @@ dist/
 .admin-credentials.local
 tsconfig.tsbuildinfo
 .vercel
+.env*

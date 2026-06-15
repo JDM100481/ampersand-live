@@ -5,6 +5,7 @@ const PROTECTED_CONSOLE_PATHS = [
   '/orders',
   '/payments',
   '/fulfillment',
+  '/reports',
 ] as const;
 
 export function isProtectedConsolePath(pathname: string): boolean {
