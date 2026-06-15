@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { signOut } from '@/lib/actions';
 
 const nav: Array<readonly [string, string]> = [
-  ['Dashboard', '/dashboard'], ['Products', '/products'], ['Resellers', '/resellers'], ['Orders', '/orders'], ['Payments', '/payments'], ['Fulfillment', '/fulfillment'], ['Reports', '/reports']
+  ['Dashboard', '/dashboard'], ['Products', '/products'], ['Resellers', '/resellers'], ['Orders', '/orders'], ['Payments', '/payments'], ['Fulfillment', '/fulfillment'], ['Procurement', '/procurement'], ['Reports', '/reports']
 ];
 
 export function AppShell({ children, userEmail }: { children: React.ReactNode; userEmail?: string | null }) {

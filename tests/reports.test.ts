@@ -120,10 +120,12 @@ describe('Sprint 6 sales reports', () => {
     expect(csv).toContain('2026-06-01,Maria Santos,bigo-maria,"1,000 Dias",2000,2000.00,GCash,fulfilled,BIGO-REF-1');
   });
 
-  it('keeps reports admin-only and report exports restricted to admin', () => {
+  it('keeps reports restricted to admin/finance and report exports restricted to admin/finance', () => {
     expect(canViewAdminReports('admin')).toBe(true);
     expect(canExportReports('admin')).toBe(true);
-    for (const role of ['finance', 'ops', 'reseller_manager', 'reseller'] as const) {
+    expect(canViewAdminReports('finance')).toBe(true);
+    expect(canExportReports('finance')).toBe(true);
+    for (const role of ['ops', 'reseller_manager', 'reseller'] as const) {
       expect(canViewAdminReports(role)).toBe(false);
       expect(canExportReports(role)).toBe(false);
     }

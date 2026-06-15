@@ -8,10 +8,13 @@ import { buildOrderSnapshot, generateOrderNumber } from '@/features/orders/order
 import { assertTransition } from '@/features/orders/order-status';
 import { assertPaymentTransition, validatePaymentForVerification, validateRejectionReason } from '@/features/payments/payment-status';
 import { buildConsumptionMovement } from '@/features/inventory/inventory-ledger';
+import { buildProcurementInput } from '@/features/procurement/procurement-input';
+import { canManageProcurement } from './permissions';
 
 function requireConfigured() { if (!isSupabaseConfigured()) throw new Error('Supabase env vars are required for writes.'); return createSupabaseServerClient(); }
 function stringValue(formData: FormData, key: string): string { return String(formData.get(key) ?? '').trim(); }
 function numberValue(formData: FormData, key: string): number { const value = Number(formData.get(key)); if (!Number.isFinite(value)) throw new Error(`${key} must be a number`); return value; }
+async function requireProcurementRole() { const role = await import('./supabase-data').then((data) => data.getCurrentRole()); if (!canManageProcurement(role)) throw new Error('Admin or finance access is required for procurement.'); }
 
 export async function signInWithPassword(formData: FormData) {
   const supabase = requireConfigured();
@@ -65,7 +68,7 @@ export async function createOrder(formData: FormData) {
   const productId = stringValue(formData, 'product_id');
   const resellerId = stringValue(formData, 'reseller_id') || null;
   const quantity = numberValue(formData, 'quantity');
-  const fxRateUsdPhp = numberValue(formData, 'fx_rate_usd_php');
+  const fxRateUsdPhp = stringValue(formData, 'fx_rate_usd_php') ? numberValue(formData, 'fx_rate_usd_php') : 1;
   const { data: product, error: productError } = await supabase
     .from('products')
     .select('id, unit_price_php, is_active')
@@ -142,6 +145,49 @@ export async function rejectPayment(formData: FormData) {
   if (paymentError) throw new Error(paymentError.message);
   await supabase.from('orders').update({ status: 'payment_rejected' }).eq('id', payment.order_id);
   revalidatePath('/payments'); revalidatePath('/orders');
+}
+
+export async function createProcurementBatch(formData: FormData) {
+  await requireProcurementRole();
+  const supabase = requireConfigured();
+  const treasuryAccountId = stringValue(formData, 'treasury_account_id');
+  const input = buildProcurementInput({
+    batchNumber: stringValue(formData, 'batch_number'),
+    supplier: stringValue(formData, 'supplier'),
+    usdPurchaseAmount: numberValue(formData, 'usd_purchase_amount'),
+    fxRateUsdPhp: numberValue(formData, 'fx_rate_usd_php'),
+    bankFeesPhp: numberValue(formData, 'bank_fees_php'),
+    otherFeesPhp: numberValue(formData, 'other_fees_php'),
+    diasReceived: numberValue(formData, 'dias_received'),
+    settlementReference: stringValue(formData, 'settlement_reference'),
+    settlementDate: stringValue(formData, 'settlement_date'),
+    expectedReplenishmentDate: stringValue(formData, 'expected_replenishment_date'),
+    notes: stringValue(formData, 'notes'),
+    status: formData.get('balance_replenished') === 'on' ? 'balance_replenished' : 'planned',
+  });
+
+  const { data: batch, error: batchError } = await supabase.from('procurement_batches').insert(input.procurementBatch).select('id').single();
+  if (batchError || !batch) throw new Error(batchError?.message ?? 'Failed to create procurement batch');
+
+  if (input.inventoryMovement) {
+    const { data: inventoryRows } = await supabase.from('inventory_movements').select('amount_dias').order('created_at', { ascending: true }).limit(1000);
+    const currentDiasBalance = (inventoryRows ?? []).reduce((sum: number, row: { amount_dias: number | null }) => sum + Number(row.amount_dias ?? 0), 0);
+    const { error } = await supabase.from('inventory_movements').insert({ ...input.inventoryMovement, source_id: batch.id, balance_after_dias: currentDiasBalance + input.inventoryMovement.amount_dias });
+    if (error) throw new Error(error.message);
+  }
+
+  if (input.treasuryMovement) {
+    let accountId = treasuryAccountId;
+    if (!accountId) {
+      const { data: account } = await supabase.from('treasury_accounts').select('id').eq('is_active', true).in('account_type', ['usd_settlement', 'bank']).order('created_at', { ascending: true }).limit(1).maybeSingle();
+      accountId = account?.id ?? '';
+    }
+    if (!accountId) throw new Error('A treasury account is required for procurement outflow.');
+    const { error } = await supabase.from('treasury_movements').insert({ ...input.treasuryMovement, treasury_account_id: accountId, source_id: batch.id });
+    if (error) throw new Error(error.message);
+  }
+
+  revalidatePath('/procurement'); revalidatePath('/reports/procurement'); revalidatePath('/reports/inventory'); revalidatePath('/reports/sales'); revalidatePath('/reports/treasury'); revalidatePath('/dashboard');
 }
 
 export async function fulfillOrder(formData: FormData) {

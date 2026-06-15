@@ -45,7 +45,7 @@ export function canViewProfit(role: Role): boolean {
 }
 
 export function canViewAdminReports(role: Role): boolean {
-  return role === 'admin';
+  return role === 'admin' || role === 'finance';
 }
 
 export function canManageResellers(role: Role): boolean {

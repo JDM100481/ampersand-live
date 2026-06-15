@@ -6,8 +6,15 @@ export interface ReportProcurementBatch {
   supplier: string;
   usdPurchaseAmount: number;
   fxRateUsdPhp: number;
+  phpEquivalent?: number;
+  bankFeesPhp?: number;
+  otherFeesPhp?: number;
   feesPhp: number;
   diasReceived: number;
+  settlementReference?: string | null;
+  settlementDate?: string | null;
+  expectedReplenishmentDate?: string | null;
+  status?: string;
 }
 
 export interface ProcurementBatchSummary extends ReportProcurementBatch {
@@ -90,8 +97,10 @@ function dateOnly(value: string): string {
 }
 
 export function summarizeProcurementBatch(batch: ReportProcurementBatch): ProcurementBatchSummary {
-  const totalPhpCost = round2(batch.usdPurchaseAmount * batch.fxRateUsdPhp);
-  const feesPhp = round2(batch.feesPhp);
+  const totalPhpCost = round2(batch.phpEquivalent ?? batch.usdPurchaseAmount * batch.fxRateUsdPhp);
+  const bankFeesPhp = round2(batch.bankFeesPhp ?? batch.feesPhp);
+  const otherFeesPhp = round2(batch.otherFeesPhp ?? 0);
+  const feesPhp = round2(bankFeesPhp + otherFeesPhp);
   const totalLandedCostPhp = round2(totalPhpCost + feesPhp);
   const diasReceived = Math.max(0, Math.trunc(batch.diasReceived));
   return {

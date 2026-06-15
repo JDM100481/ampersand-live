@@ -5,6 +5,7 @@ const PROTECTED_CONSOLE_PATHS = [
   '/orders',
   '/payments',
   '/fulfillment',
+  '/procurement',
   '/reports',
 ] as const;
 
