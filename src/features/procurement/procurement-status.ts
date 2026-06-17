@@ -1,7 +1,7 @@
 /**
  * procurement-status.ts
  *
- * BIGO Singapore procurement batch state machine.
+ * BIGO Singapore procurement invoice state machine.
  *   planned -> invoice_received -> usd_sent -> confirmed_by_bigo -> balance_replenished
  * Any pre-replenishment state may be cancelled.
  */

@@ -10,7 +10,7 @@ function source(path: string): string {
 
 describe('product catalog cost privacy', () => {
   it('does not expose procurement-cost language or fields on the Products page', () => {
-    const productsPage = source('src/app/(console)/products/page.tsx');
+    const productsPage = source('src/app/console/products/page.tsx');
 
     expect(productsPage).not.toMatch(/USD Cost|Cost \$|cost basis|COGS|Margin|Profit|FX rate|unit_cost_usd/i);
     expect(productsPage).toMatch(/PHP Price|unit_price_php/);

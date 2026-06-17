@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
   buildProcurementInput,
@@ -14,7 +14,9 @@ function source(path: string): string {
 }
 
 const formValues: ProcurementInputFormValues = {
-  batchNumber: 'BIGO-2026-003',
+  invoiceNumber: 'BIGO-INV-2026-003',
+  invoiceDate: '2026-06-14',
+  invoiceStoragePath: 'invoices/BIGO-INV-2026-003.pdf',
   supplier: '',
   usdPurchaseAmount: 100,
   fxRateUsdPhp: 56.25,
@@ -31,18 +33,22 @@ describe('procurement input workflow', () => {
   it('defaults supplier and derives PHP equivalent, total landed cost, and cost per Dias', () => {
     const input = buildProcurementInput(formValues);
 
-    expect(input.supplier).toBe('BIGO Singapore');
+    expect(input.supplier).toBe('BIGO Technology Pte. Ltd.');
     expect(input.phpEquivalent).toBe(5_625);
     expect(input.totalLandedPhpCost).toBe(5_825);
     expect(input.costPerDias).toBe(0.466);
   });
 
-  it('builds batch, inventory movement, and treasury outflow records when marked balance replenished', () => {
+  it('builds invoice, inventory movement, and treasury outflow records when marked balance replenished', () => {
     const input = buildProcurementInput({ ...formValues, status: 'balance_replenished' });
 
     expect(input.procurementBatch).toEqual(expect.objectContaining({
-      batch_number: 'BIGO-2026-003',
-      supplier_name: 'BIGO Singapore',
+      invoice_number: 'BIGO-INV-2026-003',
+      batch_number: 'BIGO-INV-2026-003',
+      invoice_date: '2026-06-14',
+      supplier_name: 'BIGO Technology Pte. Ltd.',
+      currency: 'USD',
+      invoice_storage_path: 'invoices/BIGO-INV-2026-003.pdf',
       status: 'balance_replenished',
       usd_amount: 100,
       fx_rate_usd_php: 56.25,
@@ -74,6 +80,12 @@ describe('procurement input workflow', () => {
     }));
   });
 
+  it('requires an invoice attachment when BIGO has confirmed or replenished the balance', () => {
+    expect(() => buildProcurementInput({ ...formValues, invoiceStoragePath: '', status: 'confirmed_by_bigo' })).toThrow('Invoice attachment is required');
+    expect(() => buildProcurementInput({ ...formValues, invoiceStoragePath: '', status: 'balance_replenished' })).toThrow('Invoice attachment is required');
+    expect(buildProcurementInput({ ...formValues, invoiceStoragePath: '', status: 'planned' }).procurementBatch.invoice_storage_path).toBeNull();
+  });
+
   it('exposes procurement input only to admin and finance workflows', () => {
     expect(canManageProcurement('admin')).toBe(true);
     expect(canManageProcurement('finance')).toBe(true);
@@ -84,11 +96,13 @@ describe('procurement input workflow', () => {
       expect(canViewAdminReports(role)).toBe(false);
     }
 
-    const page = source('src/app/(console)/procurement/page.tsx');
+    const page = source('src/app/console/procurement/page.tsx');
     expect(page).toContain('createProcurementBatch');
     for (const field of [
-      'batch_number',
+      'invoice_number',
+      'invoice_date',
       'supplier',
+      'currency',
       'usd_purchase_amount',
       'fx_rate_usd_php',
       'php_equivalent',
@@ -97,6 +111,7 @@ describe('procurement input workflow', () => {
       'total_landed_php_cost',
       'dias_received',
       'cost_per_dias',
+      'invoice_attachment',
       'settlement_reference',
       'settlement_date',
       'expected_replenishment_date',
@@ -104,22 +119,41 @@ describe('procurement input workflow', () => {
     ]) {
       expect(page).toContain(field);
     }
+    expect(page).toContain('Invoice Number');
+    expect(page).not.toMatch(/Batch\s+[Nn]umber/);
+
+    const action = source('src/lib/actions.ts');
+    expect(action).toContain("storage.from('procurement-documents')");
+    expect(action).toContain("formData.get('invoice_attachment')");
+
+    const procurementReport = source('src/app/console/reports/procurement/page.tsx');
+    expect(procurementReport).toContain('Invoice Number');
+    expect(procurementReport).toContain('Invoice Date');
+    expect(procurementReport).toContain('Invoice attachment');
+    expect(procurementReport).not.toMatch(/Batch\s+[Nn]umber/);
   });
 
   it('keeps procurement costs off product and customer/order pages', () => {
-    const productsPage = source('src/app/(console)/products/page.tsx');
-    const ordersPage = source('src/app/(console)/orders/page.tsx');
-    const newOrderPage = source('src/app/(console)/orders/new/page.tsx');
+    const productsPage = source('src/app/console/products/page.tsx');
+    const ordersPage = source('src/app/console/orders/page.tsx');
+    const newOrderPage = source('src/app/console/orders/new/page.tsx');
+    const customersPagePath = resolve(repoRoot, 'src/app/console/customers/page.tsx');
+    const customersPage = existsSync(customersPagePath) ? readFileSync(customersPagePath, 'utf8') : '';
 
-    for (const page of [productsPage, ordersPage, newOrderPage]) {
-      expect(page).not.toMatch(/procurement cost|landed cost|cost per Dias|COGS|margin|profit|fx_rate_usd_php/i);
+    for (const page of [productsPage, ordersPage, newOrderPage, customersPage]) {
+      expect(page).not.toMatch(/invoice|procurement cost|landed cost|cost per Dias|COGS|margin|profit|fx_rate_usd_php/i);
     }
   });
 
   it('adds procurement route and treasury outflow reporting support', () => {
-    expect(source('src/lib/auth-routes.ts')).toContain("'/procurement'");
-    expect(source('src/components/app-shell.tsx')).toContain("'/procurement'");
-    expect(source('src/app/(console)/reports/treasury/page.tsx')).toContain('procurement_out');
-    expect(source('supabase/migrations/0005_procurement_input_workflow.sql')).toContain('other_fees_php');
+    expect(source('src/lib/auth-routes.ts')).toContain("'/console'");
+    expect(source('src/components/app-shell.tsx')).toContain("'/console/procurement'");
+    expect(source('src/app/console/reports/treasury/page.tsx')).toContain('procurement_out');
+    const migration = source('supabase/migrations/0006_procurement_invoice_numbers_and_documents.sql');
+    expect(migration).toContain('invoice_number');
+    expect(migration).toContain('invoice_storage_path');
+    expect(migration).toContain('procurement-documents');
+    expect(migration).toContain('storage.buckets');
+    expect(migration).toContain("public.current_user_role() in ('admin', 'finance')");
   });
 });

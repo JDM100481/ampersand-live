@@ -56,9 +56,9 @@
 
 ---
 
-### 2. Procurement batch creation
+### 2. Procurement invoice creation
 
-**Objective:** Operators can create BIGO Singapore procurement batches from the console.
+**Objective:** Operators can create BIGO Singapore procurement invoices from the console.
 
 **Files:**
 - Modify: `src/lib/actions.ts`
@@ -68,20 +68,20 @@
 
 **Work:**
 - Add `createProcurementBatch(formData)` server action.
-- Generate batch numbers like `BIGO-YYYYMMDD-001` using count for current UTC day.
+- Use the BIGO invoice number as the primary procurement reference.
 - Required fields:
   - `usd_amount`
   - `fx_rate_usd_php`
   - optional `bank_fees_php`
-  - optional `invoice_storage_path`
+  - optional `invoice_storage_path` for planned/invoice received/USD sent statuses; required for confirmed or balance replenished statuses
   - optional `expected_replenishment_date`
   - optional `notes`
 - Compute `php_equivalent = usd_amount * fx_rate_usd_php + bank_fees_php` rounded to 2 decimals.
-- Insert into `procurement_batches` with supplier default `BIGO Singapore`, status `planned`.
+- Insert into `procurement_batches` with `invoice_number`, legacy-compatible `batch_number`, supplier default `BIGO Technology Pte. Ltd.`, currency `USD`, status `planned`.
 - Revalidate `/procurement`, `/inventory`, `/dashboard`.
-- Add `/procurement` page with mobile-first creation form and batch cards/table.
+- Add `/procurement` page with mobile-first creation form and invoice cards/table.
 
-**Acceptance:** A user can create a planned procurement batch and see it immediately in the procurement list.
+**Acceptance:** A user can create a planned procurement invoice and see it immediately in the procurement list.
 
 ---
 
@@ -115,10 +115,10 @@
   - `amount_usd = replenished_usd_amount`
   - `source_type = procurement`
   - `source_id = procurement_batches.id`
-  - `notes` referencing batch number and settlement reference
-- Do not create duplicate inbound inventory movements for the same procurement batch. Check for existing `source_type='procurement' AND source_id=batch.id` before inserting.
+  - `notes` referencing invoice number and settlement reference
+- Do not create duplicate inbound inventory movements for the same procurement invoice. Check for existing `source_type='procurement' AND source_id=batch.id` before inserting.
 
-**Acceptance:** Marking a confirmed BIGO batch as balance replenished creates exactly one positive USD inventory movement.
+**Acceptance:** Marking a confirmed BIGO invoice as balance replenished creates exactly one positive USD inventory movement.
 
 ---
 
@@ -221,7 +221,7 @@
 - Add inventory KPI cards:
   - Current USD Inventory Balance
   - Pending Procurement USD
-  - Pending Procurement Batches
+  - Pending Procurement Invoices
   - Inventory Movements
 - Keep existing dashboard metrics intact.
 

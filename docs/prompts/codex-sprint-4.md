@@ -71,7 +71,7 @@ Do not redesign tables. Add only the catalog seed migration unless absolutely ne
 
 ## Implement These Requirements
 
-### 1. Procurement batch creation
+### 1. Procurement invoice creation
 
 Add `/procurement` route.
 
@@ -88,8 +88,8 @@ Fields:
 
 Behavior:
 
-- Generate `batch_number` as `BIGO-YYYYMMDD-001`, incrementing by count for current UTC day.
-- Insert into `procurement_batches` with supplier `BIGO Singapore`, status `planned`.
+- Use `invoice_number` as the primary BIGO procurement reference and keep `batch_number` populated for legacy compatibility.
+- Insert into `procurement_batches` with supplier `BIGO Technology Pte. Ltd.`, currency `USD`, status `planned`.
 - Compute `php_equivalent = usd_amount * fx_rate_usd_php + bank_fees_php`, rounded to 2 decimals.
 - Revalidate `/procurement`, `/inventory`, `/dashboard`.
 
@@ -120,8 +120,8 @@ When transitioning from `confirmed_by_bigo` to `balance_replenished`:
 - `amount_usd = replenished_usd_amount || usd_amount`
 - `source_type = procurement`
 - `source_id = procurement_batches.id`
-- notes should reference batch number and settlement reference.
-- Prevent duplicate movement for the same procurement batch by checking existing source row first.
+- notes should reference invoice number and settlement reference.
+- Prevent duplicate movement for the same procurement invoice by checking existing source row first.
 
 ### 3. USD inventory ledger view
 
@@ -192,7 +192,7 @@ Expand dashboard metrics and cards:
 
 - Current USD Inventory Balance
 - Pending Procurement USD
-- Pending Procurement Batches
+- Pending Procurement Invoices
 - Inventory Movements
 
 Keep existing dashboard cards.

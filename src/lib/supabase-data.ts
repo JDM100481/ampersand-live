@@ -8,7 +8,7 @@ export type DbReseller = { id: string; name: string; contact_name: string | null
 export type DbOrder = { id: string; order_number: string; customer_name: string | null; customer_contact: string | null; bigo_id: string; product_id: string; reseller_id: string | null; quantity: number; status: string; total_price_php: number; total_cost_usd: number; total_cost_php: number; commission_amount_php: number; gross_profit_php: number; created_at: string; fulfilled_at?: string | null; package_dias?: number | null; products?: { name: string; diamond_amount?: number | null } | null; resellers?: { name: string } | null };
 export type DbPayment = { id: string; order_id: string; status: string; method: string; amount_php: number; reference_number: string | null; proof_storage_path: string | null; created_at: string; orders?: { order_number: string; customer_name: string | null; total_price_php: number; status: string } | null };
 export type DbTreasuryAccount = { id: string; name: string; currency: string; account_type: string };
-export type DbProcurementBatch = { id: string; batch_number: string; supplier_name: string; usd_amount: number; fx_rate_usd_php: number; php_equivalent: number; bank_fees_php: number; other_fees_php?: number | null; total_landed_php_cost?: number | null; dias_received?: number | null; cost_per_dias_php?: number | null; settlement_reference?: string | null; settlement_date?: string | null; expected_replenishment_date?: string | null; created_at: string; status: string; notes?: string | null };
+export type DbProcurementBatch = { id: string; invoice_number?: string | null; batch_number: string; invoice_date?: string | null; supplier_name: string; currency?: string | null; usd_amount: number; fx_rate_usd_php: number; php_equivalent: number; bank_fees_php: number; other_fees_php?: number | null; total_landed_php_cost?: number | null; dias_received?: number | null; cost_per_dias_php?: number | null; invoice_storage_path?: string | null; settlement_reference?: string | null; settlement_date?: string | null; expected_replenishment_date?: string | null; created_at: string; status: string; notes?: string | null };
 export type DbFulfillment = { id: string; order_id: string; status: string; bigo_reference: string | null; created_at: string; fulfilled_at: string | null };
 export type DbTreasuryMovement = { id: string; movement_type: string; currency: string; amount: number; fx_rate_usd_php: number | null; source_type: string; source_id: string | null; reference_number: string | null; movement_date: string; notes: string | null; created_at: string; treasury_accounts?: { name: string; currency: string } | null };
 
@@ -80,6 +80,14 @@ export async function listProcurementBatches(): Promise<DbProcurementBatch[]> {
   return safeQuery<DbProcurementBatch[]>(supabase.from('procurement_batches').select('*').order('created_at', { ascending: false }).limit(500) as any, []);
 }
 
+export async function createProcurementInvoiceSignedUrl(path: string): Promise<string | null> {
+  if (!isSupabaseConfigured()) return null;
+  const supabase = createSupabaseServerClient();
+  const { data, error } = await supabase.storage.from('procurement-documents').createSignedUrl(path, 60 * 10, { download: true });
+  if (error) { console.error(error); return null; }
+  return data.signedUrl;
+}
+
 export async function listFulfillments(): Promise<DbFulfillment[]> {
   if (!isSupabaseConfigured()) return [];
   const supabase = createSupabaseServerClient();
@@ -98,8 +106,11 @@ export async function salesReportData() {
     .filter((batch) => batch.status !== 'cancelled')
     .map((batch) => ({
       id: batch.id,
-      batchNumber: batch.batch_number,
-      supplier: batch.supplier_name || 'BIGO Singapore',
+      invoiceNumber: batch.invoice_number || batch.batch_number,
+      batchNumber: batch.invoice_number || batch.batch_number,
+      invoiceDate: batch.invoice_date,
+      supplier: batch.supplier_name || 'BIGO Technology Pte. Ltd.',
+      currency: batch.currency || 'USD',
       usdPurchaseAmount: Number(batch.usd_amount ?? 0),
       fxRateUsdPhp: Number(batch.fx_rate_usd_php ?? 0),
       phpEquivalent: Number(batch.php_equivalent ?? 0),
@@ -110,6 +121,7 @@ export async function salesReportData() {
       settlementReference: batch.settlement_reference,
       settlementDate: batch.settlement_date,
       expectedReplenishmentDate: batch.expected_replenishment_date,
+      invoiceStoragePath: batch.invoice_storage_path,
       status: batch.status,
     }));
   const reportOrders: ReportOrder[] = orders

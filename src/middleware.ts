@@ -1,8 +1,14 @@
 import { type NextRequest, NextResponse } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { isProtectedConsolePath } from './lib/auth-routes';
+import { getLegacyConsoleRedirectPath, isProtectedConsolePath } from './lib/auth-routes';
 
 export async function middleware(request: NextRequest) {
+  const legacyConsolePath = getLegacyConsoleRedirectPath(request.nextUrl.pathname);
+  if (legacyConsolePath) {
+    const redirectUrl = request.nextUrl.clone();
+    redirectUrl.pathname = legacyConsolePath;
+    return NextResponse.redirect(redirectUrl);
+  }
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   let response = NextResponse.next({ request });

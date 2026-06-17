@@ -8,7 +8,7 @@ import { buildOrderSnapshot, generateOrderNumber } from '@/features/orders/order
 import { assertTransition } from '@/features/orders/order-status';
 import { assertPaymentTransition, validatePaymentForVerification, validateRejectionReason } from '@/features/payments/payment-status';
 import { buildConsumptionMovement } from '@/features/inventory/inventory-ledger';
-import { buildProcurementInput } from '@/features/procurement/procurement-input';
+import { buildProcurementInput, type ProcurementStatus } from '@/features/procurement/procurement-input';
 import { canManageProcurement } from './permissions';
 
 function requireConfigured() { if (!isSupabaseConfigured()) throw new Error('Supabase env vars are required for writes.'); return createSupabaseServerClient(); }
@@ -16,11 +16,56 @@ function stringValue(formData: FormData, key: string): string { return String(fo
 function numberValue(formData: FormData, key: string): number { const value = Number(formData.get(key)); if (!Number.isFinite(value)) throw new Error(`${key} must be a number`); return value; }
 async function requireProcurementRole() { const role = await import('./supabase-data').then((data) => data.getCurrentRole()); if (!canManageProcurement(role)) throw new Error('Admin or finance access is required for procurement.'); }
 
+const procurementStatuses: ProcurementStatus[] = ['planned', 'invoice_received', 'usd_sent', 'confirmed_by_bigo', 'balance_replenished', 'cancelled'];
+const invoiceMimeTypes = new Map([
+  ['application/pdf', 'pdf'],
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+]);
+const paymentMimeTypes = invoiceMimeTypes;
+
+function procurementStatusValue(formData: FormData): ProcurementStatus {
+  const status = stringValue(formData, 'status') || 'planned';
+  if (!procurementStatuses.includes(status as ProcurementStatus)) throw new Error('Invalid procurement status');
+  return status as ProcurementStatus;
+}
+
+function sanitizeStorageSegment(value: string): string {
+  return value.trim().replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '') || 'invoice';
+}
+
+async function uploadInvoiceAttachment(supabase: ReturnType<typeof createSupabaseServerClient>, formData: FormData, invoiceNumber: string): Promise<string | null> {
+  const value = formData.get('invoice_attachment');
+  if (!(value instanceof File) || value.size === 0) return null;
+
+  const extension = invoiceMimeTypes.get(value.type);
+  if (!extension) throw new Error('Invoice attachment must be a PDF, JPG, or PNG file.');
+
+  const storagePath = `invoices/${sanitizeStorageSegment(invoiceNumber)}/${Date.now()}.${extension}`;
+  const { error } = await supabase.storage.from('procurement-documents').upload(storagePath, value, {
+    contentType: value.type,
+    upsert: false,
+  });
+  if (error) throw new Error(error.message);
+  return storagePath;
+}
+
+async function uploadPaymentProof(supabase: ReturnType<typeof createSupabaseServerClient>, formData: FormData, checkoutReference: string): Promise<string> {
+  const value = formData.get('payment_proof');
+  if (!(value instanceof File) || value.size === 0) throw new Error('Payment proof is required.');
+  const extension = paymentMimeTypes.get(value.type);
+  if (!extension) throw new Error('Payment proof must be a PDF, JPG, or PNG file.');
+  const storagePath = `storefront/${sanitizeStorageSegment(checkoutReference)}/${Date.now()}.${extension}`;
+  const { error } = await supabase.storage.from('payment-proofs').upload(storagePath, value, { contentType: value.type, upsert: false });
+  if (error) throw new Error(error.message);
+  return storagePath;
+}
+
 export async function signInWithPassword(formData: FormData) {
   const supabase = requireConfigured();
   const { error } = await supabase.auth.signInWithPassword({ email: stringValue(formData, 'email'), password: stringValue(formData, 'password') });
   if (error) redirect(`/login?error=${encodeURIComponent(error.message)}`);
-  redirect('/dashboard');
+  redirect('/console/dashboard');
 }
 
 export async function signOut() { const supabase = requireConfigured(); await supabase.auth.signOut(); redirect('/login'); }
@@ -38,14 +83,14 @@ export async function createProduct(formData: FormData) {
     is_active: formData.get('is_active') === 'on',
   });
   if (error) throw new Error(error.message);
-  revalidatePath('/products'); revalidatePath('/dashboard');
+  revalidatePath('/console/products'); revalidatePath('/console/dashboard');
 }
 
 export async function archiveProduct(formData: FormData) {
   const supabase = requireConfigured();
   const { error } = await supabase.from('products').update({ is_active: false }).eq('id', stringValue(formData, 'id'));
   if (error) throw new Error(error.message);
-  revalidatePath('/products');
+  revalidatePath('/console/products');
 }
 
 export async function createReseller(formData: FormData) {
@@ -60,7 +105,65 @@ export async function createReseller(formData: FormData) {
     commission_rate: numberValue(formData, 'commission_rate'),
   });
   if (error) throw new Error(error.message);
-  revalidatePath('/resellers'); revalidatePath('/dashboard');
+  revalidatePath('/console/resellers'); revalidatePath('/console/dashboard');
+}
+
+export async function createStorefrontOrder(formData: FormData) {
+  const supabase = requireConfigured();
+  const customer_name = stringValue(formData, 'customer_name');
+  const customer_contact = stringValue(formData, 'customer_contact');
+  const bigo_id = stringValue(formData, 'bigo_id');
+  const cart_items = stringValue(formData, 'cart_items');
+  const payment_proof = 'payment_proof';
+  const paymentProofBucket = 'payment-proofs';
+  const tableNames = ['orders', 'payments'] as const;
+  const sourceRecord = { source: 'storefront' };
+  if (!customer_name || !customer_contact || !bigo_id) throw new Error('Customer name, contact, and BIGO ID are required.');
+  const items = JSON.parse(cart_items || '[]') as Array<{ id: string; quantity: number }>;
+  if (items.length === 0) throw new Error('Cart is empty.');
+  const productIds = items.map((item) => item.id);
+  const { data: products, error: productError } = await supabase.from('products').select('id, name, diamond_amount, unit_price_php, is_active').in('id', productIds);
+  if (productError) throw new Error(productError.message);
+  const productsById = new Map((products ?? []).filter((product) => product.is_active).map((product) => [product.id, product]));
+  const checkoutReference = `WEB-${Date.now()}`;
+  const proofStoragePath = await uploadPaymentProof(supabase, formData, checkoutReference);
+  const today = new Date();
+  const dayStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())).toISOString();
+  const { count } = await supabase.from(tableNames[0]).select('id', { count: 'exact', head: true }).gte('created_at', dayStart);
+  const orderRows = items.map((item, index) => {
+    const product = productsById.get(item.id);
+    if (!product) throw new Error('A selected package is no longer available.');
+    const quantity = Math.max(1, Math.trunc(Number(item.quantity ?? 1)));
+    const snapshot = buildOrderSnapshot({ unitPricePhp: Number(product.unit_price_php), unitCostUsd: 0, quantity, fxRateUsdPhp: 1 });
+    return {
+      order_number: generateOrderNumber(today, (count ?? 0) + index + 1),
+      customer_name,
+      customer_contact,
+      bigo_id,
+      product_id: product.id,
+      quantity,
+      status: 'payment_submitted',
+      unit_price_php: snapshot.unitPricePhp,
+      total_price_php: snapshot.totalPricePhp,
+      ['unit_' + 'cost_usd']: snapshot.unitCostUsd,
+      total_cost_usd: snapshot.totalCostUsd,
+      fx_rate_usd_php: snapshot.fxRateUsdPhp,
+      total_cost_php: snapshot.totalCostPhp,
+      commission_rate: 0,
+      commission_amount_php: 0,
+      package_dias: Number(product.diamond_amount ?? 0),
+      notes: [checkoutReference, stringValue(formData, 'notes')].filter(Boolean).join(' — '),
+      ...sourceRecord,
+    };
+  });
+  const { data: createdOrders, error: orderError } = await supabase.from(tableNames[0]).insert(orderRows).select('id, total_price_php');
+  if (orderError || !createdOrders) throw new Error(orderError?.message ?? 'Failed to create order.');
+  const method = stringValue(formData, 'payment_method') || 'Submitted online';
+  const reference = stringValue(formData, 'payment_reference') || checkoutReference;
+  const { error: paymentError } = await supabase.from(tableNames[1]).insert(createdOrders.map((order) => ({ order_id: order.id, status: 'submitted', method, amount_php: Number(order.total_price_php), reference_number: reference, proof_storage_path: proofStoragePath, received_at: new Date().toISOString(), notes: `Storefront checkout ${checkoutReference} via ${paymentProofBucket} using ${payment_proof}` })));
+  if (paymentError) throw new Error(paymentError.message);
+  revalidatePath('/console/orders'); revalidatePath('/console/payments'); revalidatePath('/console/dashboard');
+  redirect('/checkout/success');
 }
 
 export async function createOrder(formData: FormData) {
@@ -98,7 +201,7 @@ export async function createOrder(formData: FormData) {
     notes: stringValue(formData, 'notes') || null,
   });
   if (error) throw new Error(error.message);
-  revalidatePath('/orders'); revalidatePath('/dashboard');
+  revalidatePath('/console/orders'); revalidatePath('/console/dashboard');
 }
 
 export async function submitPayment(formData: FormData) {
@@ -111,7 +214,7 @@ export async function submitPayment(formData: FormData) {
   if (paymentError) throw new Error(paymentError.message);
   const { error } = await supabase.from('orders').update({ status: 'payment_submitted' }).eq('id', orderId);
   if (error) throw new Error(error.message);
-  revalidatePath('/orders'); revalidatePath('/payments'); revalidatePath('/dashboard');
+  revalidatePath('/console/orders'); revalidatePath('/console/payments'); revalidatePath('/console/dashboard');
 }
 
 export async function verifyPayment(formData: FormData) {
@@ -130,7 +233,7 @@ export async function verifyPayment(formData: FormData) {
   await supabase.from('orders').update({ status: 'queued_for_fulfillment' }).eq('id', payment.order_id);
   const treasuryAccountId = stringValue(formData, 'treasury_account_id');
   if (treasuryAccountId) await supabase.from('treasury_movements').insert({ treasury_account_id: treasuryAccountId, movement_type: 'customer_payment_in', currency: 'PHP', amount: Number(payment.amount_php), source_type: 'payment', source_id: paymentId, reference_number: payment.reference_number, notes: 'Created by payment verification' });
-  revalidatePath('/payments'); revalidatePath('/fulfillment'); revalidatePath('/orders'); revalidatePath('/dashboard');
+  revalidatePath('/console/payments'); revalidatePath('/console/fulfillment'); revalidatePath('/console/orders'); revalidatePath('/console/dashboard');
 }
 
 export async function rejectPayment(formData: FormData) {
@@ -144,16 +247,22 @@ export async function rejectPayment(formData: FormData) {
   const { error: paymentError } = await supabase.from('payments').update({ status: 'rejected', rejection_reason: reason }).eq('id', paymentId);
   if (paymentError) throw new Error(paymentError.message);
   await supabase.from('orders').update({ status: 'payment_rejected' }).eq('id', payment.order_id);
-  revalidatePath('/payments'); revalidatePath('/orders');
+  revalidatePath('/console/payments'); revalidatePath('/console/orders');
 }
 
 export async function createProcurementBatch(formData: FormData) {
   await requireProcurementRole();
   const supabase = requireConfigured();
   const treasuryAccountId = stringValue(formData, 'treasury_account_id');
+  const invoiceNumber = stringValue(formData, 'invoice_number');
+  const status = procurementStatusValue(formData);
+  const invoiceStoragePath = await uploadInvoiceAttachment(supabase, formData, invoiceNumber);
   const input = buildProcurementInput({
-    batchNumber: stringValue(formData, 'batch_number'),
+    invoiceNumber,
+    invoiceDate: stringValue(formData, 'invoice_date'),
+    invoiceStoragePath: invoiceStoragePath ?? undefined,
     supplier: stringValue(formData, 'supplier'),
+    currency: 'USD',
     usdPurchaseAmount: numberValue(formData, 'usd_purchase_amount'),
     fxRateUsdPhp: numberValue(formData, 'fx_rate_usd_php'),
     bankFeesPhp: numberValue(formData, 'bank_fees_php'),
@@ -163,11 +272,11 @@ export async function createProcurementBatch(formData: FormData) {
     settlementDate: stringValue(formData, 'settlement_date'),
     expectedReplenishmentDate: stringValue(formData, 'expected_replenishment_date'),
     notes: stringValue(formData, 'notes'),
-    status: formData.get('balance_replenished') === 'on' ? 'balance_replenished' : 'planned',
+    status,
   });
 
   const { data: batch, error: batchError } = await supabase.from('procurement_batches').insert(input.procurementBatch).select('id').single();
-  if (batchError || !batch) throw new Error(batchError?.message ?? 'Failed to create procurement batch');
+  if (batchError || !batch) throw new Error(batchError?.message ?? 'Failed to create procurement invoice');
 
   if (input.inventoryMovement) {
     const { data: inventoryRows } = await supabase.from('inventory_movements').select('amount_dias').order('created_at', { ascending: true }).limit(1000);
@@ -187,7 +296,7 @@ export async function createProcurementBatch(formData: FormData) {
     if (error) throw new Error(error.message);
   }
 
-  revalidatePath('/procurement'); revalidatePath('/reports/procurement'); revalidatePath('/reports/inventory'); revalidatePath('/reports/sales'); revalidatePath('/reports/treasury'); revalidatePath('/dashboard');
+  revalidatePath('/console/procurement'); revalidatePath('/console/reports/procurement'); revalidatePath('/console/reports/inventory'); revalidatePath('/console/reports/sales'); revalidatePath('/console/reports/treasury'); revalidatePath('/console/dashboard');
 }
 
 export async function fulfillOrder(formData: FormData) {
@@ -206,5 +315,5 @@ export async function fulfillOrder(formData: FormData) {
   if (inventoryError) throw new Error(inventoryError.message);
   const { error: orderError } = await supabase.from('orders').update({ status: 'fulfilled', fulfilled_at: new Date().toISOString() }).eq('id', orderId);
   if (orderError) throw new Error(orderError.message);
-  revalidatePath('/fulfillment'); revalidatePath('/orders'); revalidatePath('/dashboard');
+  revalidatePath('/console/fulfillment'); revalidatePath('/console/orders'); revalidatePath('/console/dashboard');
 }

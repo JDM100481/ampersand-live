@@ -1,2 +1,8 @@
-import { redirect } from 'next/navigation';
-export default function Home() { redirect('/dashboard'); }
+import Link from 'next/link';
+import { StorefrontCatalog } from '@/components/storefront-cart';
+import { listProducts } from '@/lib/supabase-data';
+
+export default async function StorefrontHomePage() {
+  const products = await listProducts();
+  return <main className="min-h-screen bg-gradient-to-b from-white to-slate-50"><section className="mx-auto max-w-6xl px-4 py-10"><nav className="mb-10 flex items-center justify-between"><div><p className="text-xs font-semibold uppercase tracking-[0.3em] text-ampersand-600">Ampersand LIVE</p><h1 className="text-2xl font-black text-slate-950">BIGO Dias Store</h1></div><Link className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700" href="/cart">Cart</Link></nav><div className="mb-8 rounded-3xl bg-slate-950 p-8 text-white shadow-soft"><p className="text-sm font-semibold uppercase tracking-[0.25em] text-ampersand-200">Fast manual fulfillment</p><h2 className="mt-3 max-w-3xl text-4xl font-black tracking-tight md:text-5xl">Buy BIGO Dias with PHP payment confirmation.</h2><p className="mt-4 max-w-2xl text-slate-300">Choose your package, upload your payment proof, and the Ampersand LIVE team will confirm and fulfill your order.</p></div>{products.length === 0 ? <div className="rounded-3xl border border-slate-200 bg-white p-8 text-center shadow-soft"><p className="text-slate-600">No active packages are available yet.</p></div> : <StorefrontCatalog products={products.map((product) => ({ id: product.id, name: product.name, bigo_sku: product.bigo_sku, diamond_amount: product.diamond_amount, unit_price_php: Number(product.unit_price_php) }))} />}</section></main>;
+}

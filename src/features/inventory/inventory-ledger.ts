@@ -74,7 +74,7 @@ export function buildConsumptionMovement(input: {
   return { movementType: 'order_consumption', amountUsd: round2(-totalCostUsd) };
 }
 
-/** Build the inbound movement when a procurement batch is replenished. */
+/** Build the inbound movement when a procurement invoice is replenished. */
 export function buildProcurementMovement(replenishedUsd: number): InventoryMovement {
   if (replenishedUsd <= 0) throw new Error('Replenished amount must be > 0');
   return { movementType: 'procurement_in', amountUsd: round2(replenishedUsd) };

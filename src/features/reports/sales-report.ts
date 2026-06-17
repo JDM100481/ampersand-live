@@ -2,8 +2,11 @@ import { round2 } from '../../lib/money';
 
 export interface ReportProcurementBatch {
   id: string;
+  invoiceNumber?: string;
   batchNumber: string;
+  invoiceDate?: string | null;
   supplier: string;
+  currency?: string;
   usdPurchaseAmount: number;
   fxRateUsdPhp: number;
   phpEquivalent?: number;
@@ -14,6 +17,7 @@ export interface ReportProcurementBatch {
   settlementReference?: string | null;
   settlementDate?: string | null;
   expectedReplenishmentDate?: string | null;
+  invoiceStoragePath?: string | null;
   status?: string;
 }
 

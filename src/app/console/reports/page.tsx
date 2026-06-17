@@ -4,10 +4,10 @@ import { getCurrentRole } from '@/lib/supabase-data';
 import { canViewAdminReports } from '@/lib/permissions';
 
 const reports = [
-  ['Sales', '/reports/sales', 'Procurement, sales, inventory, and detailed fulfilled order export.'],
-  ['Procurement', '/reports/procurement', 'BIGO Singapore batch landed cost and cost-per-Dias view.'],
-  ['Inventory', '/reports/inventory', 'Pooled Dias beginning, received, sold, ending, and PHP value.'],
-  ['Treasury', '/reports/treasury', 'Cash movement report shell for payment and settlement reconciliation.'],
+  ['Sales', '/console/reports/sales', 'Procurement, sales, inventory, and detailed fulfilled order export.'],
+  ['Procurement', '/console/reports/procurement', 'BIGO Singapore invoice landed cost and cost-per-Dias view.'],
+  ['Inventory', '/console/reports/inventory', 'Pooled Dias beginning, received, sold, ending, and PHP value.'],
+  ['Treasury', '/console/reports/treasury', 'Cash movement report shell for payment and settlement reconciliation.'],
 ] as const;
 
 export default async function ReportsPage() {

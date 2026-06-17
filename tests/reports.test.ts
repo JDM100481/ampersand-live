@@ -22,7 +22,8 @@ const batches: ReportProcurementBatch[] = [
   {
     id: 'batch-1',
     batchNumber: 'BIGO-2026-001',
-    supplier: 'BIGO Singapore',
+    invoiceNumber: 'BIGO-INV-2026-001',
+    supplier: 'BIGO Technology Pte. Ltd.',
     usdPurchaseAmount: 100,
     fxRateUsdPhp: 56,
     feesPhp: 400,
@@ -31,7 +32,8 @@ const batches: ReportProcurementBatch[] = [
   {
     id: 'batch-2',
     batchNumber: 'BIGO-2026-002',
-    supplier: 'BIGO Singapore',
+    invoiceNumber: 'BIGO-INV-2026-002',
+    supplier: 'BIGO Technology Pte. Ltd.',
     usdPurchaseAmount: 50,
     fxRateUsdPhp: 57,
     feesPhp: 150,
@@ -75,13 +77,14 @@ const fulfillments: ReportFulfillment[] = [
 ];
 
 describe('Sprint 6 sales reports', () => {
-  it('summarizes procurement batches and uses pooled batch cost per Dias for COGS', () => {
+  it('summarizes procurement invoices and uses pooled invoice cost per Dias for COGS', () => {
     const report = buildSalesReport({ beginningDiasBalance: 1_000, batches, orders, payments, fulfillments });
 
     expect(report.procurementBatches).toEqual([
       expect.objectContaining({
+        invoiceNumber: 'BIGO-INV-2026-001',
         batchNumber: 'BIGO-2026-001',
-        supplier: 'BIGO Singapore',
+        supplier: 'BIGO Technology Pte. Ltd.',
         totalPhpCost: 5_600,
         feesPhp: 400,
         totalLandedCostPhp: 6_000,
@@ -129,17 +132,17 @@ describe('Sprint 6 sales reports', () => {
       expect(canViewAdminReports(role)).toBe(false);
       expect(canExportReports(role)).toBe(false);
     }
-    expect(isProtectedConsolePath('/reports')).toBe(true);
-    expect(isProtectedConsolePath('/reports/sales')).toBe(true);
+    expect(isProtectedConsolePath('/console/reports')).toBe(true);
+    expect(isProtectedConsolePath('/console/reports/sales')).toBe(true);
   });
 
   it('renders all required report routes and does not expose costs on product UI', () => {
     for (const route of ['reports', 'sales', 'procurement', 'inventory', 'treasury']) {
-      const path = route === 'reports' ? 'src/app/(console)/reports/page.tsx' : `src/app/(console)/reports/${route}/page.tsx`;
+      const path = route === 'reports' ? 'src/app/console/reports/page.tsx' : `src/app/console/reports/${route}/page.tsx`;
       expect(source(path)).toBeTruthy();
     }
 
-    const productsPage = source('src/app/(console)/products/page.tsx');
+    const productsPage = source('src/app/console/products/page.tsx');
     expect(productsPage).not.toMatch(/COGS|Margin|Profit|FX rate|unit_cost_usd|procurement cost/i);
   });
 });

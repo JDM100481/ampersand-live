@@ -16,7 +16,7 @@ export default async function InventoryReportPage() {
     ['Inventory value PHP', money(report.inventorySummary.inventoryValuePhp)],
   ];
   return <>
-    <PageHeader title="Inventory Report" description="Admin-only pooled Dias inventory report valued at procurement batch cost per Dias." />
+    <PageHeader title="Inventory Report" description="Admin-only pooled Dias inventory report valued at procurement invoice cost per Dias." />
     <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">{rows.map(([label, value]) => <Card key={label}><p className="text-sm text-slate-500">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p></Card>)}</div>
   </>;
 }
